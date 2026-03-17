@@ -1,0 +1,1037 @@
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { 
+  Package, RefreshCw, Search, Plus, Edit, Trash2, Eye, MoreVertical, 
+  Link2, Save, Check, X, ArrowUpDown, Percent, Power, PowerOff
+} from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+
+interface Service {
+  id: string;
+  service_id: number;
+  name: string;
+  description: string | null;
+  platform: string;
+  category: string;
+  base_price: number;
+  provider_price: number | null;
+  min_quantity: number;
+  max_quantity: number;
+  is_active: boolean;
+  refill_supported: boolean | null;
+  dripfeed_supported: boolean | null;
+  provider_id: string | null;
+  provider_service_id: string | null;
+  created_at: string;
+  updated_at: string;
+  speed_estimate: string | null;
+}
+
+interface Provider {
+  id: string;
+  name: string;
+  api_url: string;
+}
+
+const PLATFORMS = ['Instagram', 'YouTube', 'TikTok', 'Telegram', 'X', 'Facebook', 'Spotify', 'Discord', 'Twitch', 'Snapchat', 'LinkedIn', 'Pinterest', 'Other'];
+const CATEGORIES = ['Followers', 'Likes', 'Views', 'Comments', 'Shares', 'Subscribers', 'Members', 'Reactions', 'Saves', 'Impressions', 'Reach', 'General', 'Premium', 'Other'];
+
+export function ServiceManagementTab() {
+  const [services, setServices] = useState<Service[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  
+  // Dialogs
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [mappingDialogOpen, setMappingDialogOpen] = useState(false);
+  const [bulkActionDialogOpen, setBulkActionDialogOpen] = useState(false);
+  const [bulkActionType, setBulkActionType] = useState<'enable' | 'disable' | 'price' | 'category' | 'delete'>('enable');
+  
+  // Edit form state
+  const [editingService, setEditingService] = useState<Service | null>(null);
+  const [editForm, setEditForm] = useState({
+    service_id: 0,
+    name: '',
+    description: '',
+    platform: 'Instagram',
+    category: 'General',
+    base_price: '',
+    min_quantity: '',
+    max_quantity: '',
+    refill_supported: false,
+    dripfeed_supported: false,
+    is_active: true,
+    speed_estimate: ''
+  });
+  
+  // Bulk action form
+  const [bulkPriceChange, setBulkPriceChange] = useState({ type: 'percent', value: '' });
+  const [bulkCategory, setBulkCategory] = useState('General');
+  
+  // Inline editing
+  const [inlineEditing, setInlineEditing] = useState<{ id: string; field: string } | null>(null);
+  const [inlineValue, setInlineValue] = useState('');
+  
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [servicesRes, providersRes] = await Promise.all([
+      supabase.from('services').select('*').order('service_id', { ascending: true }),
+      supabase.from('api_providers').select('id, name, api_url')
+    ]);
+    
+    setServices(servicesRes.data || []);
+    setProviders(providersRes.data || []);
+    setLoading(false);
+  };
+
+  const filteredServices = services.filter(service => {
+    const matchesSearch = searchQuery === "" || 
+      service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      service.service_id.toString().includes(searchQuery) ||
+      service.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesPlatform = platformFilter === "all" || service.platform === platformFilter;
+    return matchesSearch && matchesPlatform;
+  });
+
+  const getProvider = (providerId: string | null) => {
+    return providers.find(p => p.id === providerId);
+  };
+
+  // Open edit dialog
+  const openEditDialog = (service: Service) => {
+    setEditingService(service);
+    setEditForm({
+      service_id: service.service_id,
+      name: service.name,
+      description: service.description || '',
+      platform: service.platform,
+      category: service.category,
+      base_price: service.base_price.toString(),
+      min_quantity: service.min_quantity.toString(),
+      max_quantity: service.max_quantity.toString(),
+      refill_supported: service.refill_supported || false,
+      dripfeed_supported: service.dripfeed_supported || false,
+      is_active: service.is_active,
+      speed_estimate: service.speed_estimate || ''
+    });
+    setEditDialogOpen(true);
+  };
+
+  // Save edited service
+  const saveService = async () => {
+    if (!editingService) return;
+
+    const { error } = await supabase
+      .from('services')
+      .update({
+        service_id: editForm.service_id,
+        name: editForm.name,
+        description: editForm.description,
+        platform: editForm.platform,
+        category: editForm.category,
+        base_price: parseFloat(editForm.base_price),
+        min_quantity: parseInt(editForm.min_quantity),
+        max_quantity: parseInt(editForm.max_quantity),
+        refill_supported: editForm.refill_supported,
+        dripfeed_supported: editForm.dripfeed_supported,
+        is_active: editForm.is_active,
+        speed_estimate: editForm.speed_estimate || null
+      })
+      .eq('id', editingService.id);
+
+    if (error) {
+      toast({ title: "Failed to update service", variant: "destructive" });
+    } else {
+      toast({ title: "Service Updated", description: "Changes saved successfully" });
+      setEditDialogOpen(false);
+      setEditingService(null);
+      fetchData();
+    }
+  };
+
+  // Add new service
+  const addService = async () => {
+    const { error } = await supabase.from('services').insert({
+      service_id: editForm.service_id || Math.floor(1000 + Math.random() * 9000),
+      name: editForm.name,
+      description: editForm.description,
+      platform: editForm.platform,
+      category: editForm.category,
+      base_price: parseFloat(editForm.base_price),
+      min_quantity: parseInt(editForm.min_quantity) || 100,
+      max_quantity: parseInt(editForm.max_quantity) || 50000,
+      refill_supported: editForm.refill_supported,
+      dripfeed_supported: editForm.dripfeed_supported,
+      is_active: editForm.is_active,
+      speed_estimate: editForm.speed_estimate || null
+    });
+
+    if (error) {
+      toast({ title: "Failed to add service", variant: "destructive" });
+    } else {
+      toast({ title: "Service Added" });
+      setAddDialogOpen(false);
+      resetEditForm();
+      fetchData();
+    }
+  };
+
+  const resetEditForm = () => {
+    setEditForm({
+      service_id: Math.floor(1000 + Math.random() * 9000),
+      name: '',
+      description: '',
+      platform: 'Instagram',
+      category: 'General',
+      base_price: '',
+      min_quantity: '100',
+      max_quantity: '50000',
+      refill_supported: false,
+      dripfeed_supported: false,
+      is_active: true,
+      speed_estimate: ''
+    });
+  };
+
+  // Toggle service status
+  const toggleServiceStatus = async (service: Service) => {
+    const { error } = await supabase
+      .from('services')
+      .update({ is_active: !service.is_active })
+      .eq('id', service.id);
+
+    if (error) {
+      toast({ title: "Failed to update", variant: "destructive" });
+    } else {
+      toast({ title: service.is_active ? "Service Disabled" : "Service Enabled" });
+      fetchData();
+    }
+  };
+
+  // Delete service
+  const deleteService = async (serviceId: string) => {
+    const { error } = await supabase.from('services').delete().eq('id', serviceId);
+    if (error) {
+      toast({ title: "Failed to delete", variant: "destructive" });
+    } else {
+      toast({ title: "Service Deleted" });
+      fetchData();
+    }
+  };
+
+  // Inline edit save
+  const saveInlineEdit = async (serviceId: string, field: string, value: string) => {
+    let updateData: any = {};
+    
+    if (field === 'base_price') {
+      updateData.base_price = parseFloat(value);
+    } else if (field === 'is_active') {
+      updateData.is_active = value === 'true';
+    } else if (field === 'name') {
+      updateData.name = value;
+    }
+
+    const { error } = await supabase.from('services').update(updateData).eq('id', serviceId);
+    
+    if (error) {
+      toast({ title: "Failed to update", variant: "destructive" });
+    } else {
+      toast({ title: "Updated" });
+      fetchData();
+    }
+    setInlineEditing(null);
+  };
+
+  // Bulk actions
+  const selectAll = () => {
+    if (selectedServices.size === filteredServices.length) {
+      setSelectedServices(new Set());
+    } else {
+      setSelectedServices(new Set(filteredServices.map(s => s.id)));
+    }
+  };
+
+  const executeBulkAction = async () => {
+    const ids = Array.from(selectedServices);
+    
+    if (ids.length === 0) {
+      toast({ title: "No services selected", variant: "destructive" });
+      return;
+    }
+
+    try {
+      // Process in batches of 200 to avoid DB query limits with large selections
+      const BATCH_SIZE = 200;
+
+      const batchUpdate = async (updateData: any) => {
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          const { error } = await supabase.from('services').update(updateData).in('id', batch);
+          if (error) throw error;
+        }
+      };
+
+      const batchDelete = async () => {
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          const { error } = await supabase.from('services').delete().in('id', batch);
+          if (error) throw error;
+        }
+      };
+
+      switch (bulkActionType) {
+        case 'enable':
+          await batchUpdate({ is_active: true });
+          // Also update panel_services visibility
+          for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+            const batch = ids.slice(i, i + BATCH_SIZE);
+            const relevantSvcIds = services.filter(s => ids.includes(s.id)).map(s => s.service_id);
+            if (relevantSvcIds.length > 0) {
+              await supabase.from('panel_services').update({ is_visible: true }).in('service_id', relevantSvcIds);
+            }
+          }
+          break;
+        case 'disable':
+          await batchUpdate({ is_active: false });
+          // Also hide in panel_services
+          for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+            const batch = ids.slice(i, i + BATCH_SIZE);
+            const relevantSvcIds = services.filter(s => ids.includes(s.id)).map(s => s.service_id);
+            if (relevantSvcIds.length > 0) {
+              await supabase.from('panel_services').update({ is_visible: false }).in('service_id', relevantSvcIds);
+            }
+          }
+          break;
+        case 'delete':
+          await batchDelete();
+          break;
+        case 'category':
+          await batchUpdate({ category: bulkCategory });
+          break;
+        case 'price': {
+          const selectedServicesList = services.filter(s => ids.includes(s.id));
+          for (let i = 0; i < selectedServicesList.length; i += BATCH_SIZE) {
+            const batch = selectedServicesList.slice(i, i + BATCH_SIZE);
+            for (const service of batch) {
+              let newPrice = service.base_price;
+              if (bulkPriceChange.type === 'percent') {
+                newPrice = service.base_price * (1 + parseFloat(bulkPriceChange.value) / 100);
+              } else {
+                newPrice = service.base_price + parseFloat(bulkPriceChange.value);
+              }
+              const { error } = await supabase.from('services').update({ base_price: Math.max(0, newPrice) }).eq('id', service.id);
+              if (error) throw error;
+            }
+          }
+          break;
+        }
+      }
+
+      toast({ title: "Bulk Action Completed", description: `${ids.length} services updated` });
+      setSelectedServices(new Set());
+      setBulkActionDialogOpen(false);
+      fetchData();
+    } catch (err: any) {
+      console.error('Bulk action error:', err);
+      toast({ title: "Bulk action failed", description: err.message || "Please try again", variant: "destructive" });
+    }
+  };
+
+  // View mapping
+  const openMappingDialog = (service: Service) => {
+    setEditingService(service);
+    setMappingDialogOpen(true);
+  };
+
+  // Calculate panel price (with example 30% margin)
+  const calculatePanelPrice = (providerPrice: number | null, basePrice: number) => {
+    return basePrice;
+  };
+
+  if (loading) {
+    return (
+      <Card className="border-border/30 bg-card/60">
+        <CardContent className="flex items-center justify-center py-12">
+          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card className="border-border/30 bg-card/60">
+        <CardHeader>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg font-display">Service Control Panel</CardTitle>
+              <CardDescription>Full editing & abstraction layer for services</CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Search services..." 
+                  className="pl-9 w-[200px] bg-secondary/30"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <Select value={platformFilter} onValueChange={setPlatformFilter}>
+                <SelectTrigger className="w-[140px] bg-secondary/30">
+                  <SelectValue placeholder="Platform" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Platforms</SelectItem>
+                  {PLATFORMS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="icon" onClick={fetchData}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <Button onClick={() => { resetEditForm(); setAddDialogOpen(true); }}>
+                <Plus className="h-4 w-4 mr-2" />Add Service
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* Bulk Actions Bar */}
+          {selectedServices.size > 0 && (
+            <div className="flex items-center gap-4 mb-4 p-3 bg-primary/10 border border-primary/30 rounded-lg">
+              <span className="text-sm font-medium">{selectedServices.size} selected</span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => { setBulkActionType('enable'); setBulkActionDialogOpen(true); }}>
+                  <Power className="h-3 w-3 mr-1" />Enable
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setBulkActionType('disable'); setBulkActionDialogOpen(true); }}>
+                  <PowerOff className="h-3 w-3 mr-1" />Disable
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setBulkActionType('price'); setBulkActionDialogOpen(true); }}>
+                  <Percent className="h-3 w-3 mr-1" />Adjust Price
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setBulkActionType('category'); setBulkActionDialogOpen(true); }}>
+                  <ArrowUpDown className="h-3 w-3 mr-1" />Category
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => { setBulkActionType('delete'); setBulkActionDialogOpen(true); }}>
+                  <Trash2 className="h-3 w-3 mr-1" />Delete
+                </Button>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedServices(new Set())}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {services.length === 0 ? (
+            <div className="text-center py-12">
+              <Package className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground">No services configured yet</p>
+              <p className="text-sm text-muted-foreground mt-1">Add a provider and sync services, or add manually</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border/30">
+                    <th className="text-left p-3 w-10">
+                      <Checkbox 
+                        checked={selectedServices.size === filteredServices.length && filteredServices.length > 0}
+                        onCheckedChange={selectAll}
+                      />
+                    </th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Panel ID / Provider ID</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Service</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Platform</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Provider Price</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Panel Price</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Limits</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Status</th>
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredServices.map((service) => {
+                    const provider = getProvider(service.provider_id);
+                    return (
+                      <tr key={service.id} className="border-b border-border/20 hover:bg-secondary/10 group">
+                        <td className="p-3">
+                          <Checkbox 
+                            checked={selectedServices.has(service.id)}
+                            onCheckedChange={(checked) => {
+                              const newSet = new Set(selectedServices);
+                              if (checked) {
+                                newSet.add(service.id);
+                              } else {
+                                newSet.delete(service.id);
+                              }
+                              setSelectedServices(newSet);
+                            }}
+                          />
+                        </td>
+                        <td className="p-3">
+                          <div className="font-mono text-sm text-primary">{service.service_id}</div>
+                          <div className="font-mono text-xs text-muted-foreground">{service.provider_service_id || '—'}</div>
+                        </td>
+                        <td className="p-3 max-w-[250px]">
+                          {inlineEditing?.id === service.id && inlineEditing.field === 'name' ? (
+                            <div className="flex items-center gap-1">
+                              <Input 
+                                className="h-7 w-40 text-xs"
+                                value={inlineValue}
+                                onChange={(e) => setInlineValue(e.target.value)}
+                                autoFocus
+                              />
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => saveInlineEdit(service.id, 'name', inlineValue)}>
+                                <Check className="h-3 w-3 text-success" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setInlineEditing(null)}>
+                                <X className="h-3 w-3 text-destructive" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <p 
+                              className="font-medium text-foreground text-sm truncate cursor-pointer hover:underline" 
+                              title={service.name}
+                              onClick={() => {
+                                setInlineEditing({ id: service.id, field: 'name' });
+                                setInlineValue(service.name);
+                              }}
+                            >
+                              {service.name}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground truncate">{service.category}</p>
+                        </td>
+                        <td className="p-3">
+                          <Badge variant="outline">{service.platform}</Badge>
+                        </td>
+                        <td className="p-3">
+                          {service.provider_price !== null ? (
+                            <span className="font-mono text-xs text-muted-foreground">
+                              ${Number(service.provider_price).toFixed(4)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">N/A</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {inlineEditing?.id === service.id && inlineEditing.field === 'base_price' ? (
+                            <div className="flex items-center gap-1">
+                              <Input 
+                                type="number"
+                                step="0.0001"
+                                className="h-7 w-20 text-xs"
+                                value={inlineValue}
+                                onChange={(e) => setInlineValue(e.target.value)}
+                                autoFocus
+                              />
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => saveInlineEdit(service.id, 'base_price', inlineValue)}>
+                                <Check className="h-3 w-3 text-success" />
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setInlineEditing(null)}>
+                                <X className="h-3 w-3 text-destructive" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <span 
+                              className="font-mono text-sm text-success cursor-pointer hover:underline"
+                              onClick={() => {
+                                setInlineEditing({ id: service.id, field: 'base_price' });
+                                setInlineValue(service.base_price.toString());
+                              }}
+                            >
+                              ${Number(service.base_price).toFixed(4)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-xs text-muted-foreground font-mono">
+                          {service.min_quantity.toLocaleString()} - {service.max_quantity.toLocaleString()}
+                        </td>
+                        <td className="p-3">
+                          <Switch
+                            checked={service.is_active}
+                            onCheckedChange={() => toggleServiceStatus(service)}
+                          />
+                        </td>
+                        <td className="p-3">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <div className="px-2 py-1.5 text-xs text-muted-foreground border-b border-border/30 mb-1">
+                                <span className="font-medium">Provider Name:</span> {provider?.name || 'Unknown'}
+                              </div>
+                              <DropdownMenuItem onClick={() => openEditDialog(service)}>
+                                <Edit className="h-4 w-4 mr-2" />Edit Service
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openMappingDialog(service)}>
+                                <Link2 className="h-4 w-4 mr-2" />View Mapping
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => toggleServiceStatus(service)}>
+                                {service.is_active ? <PowerOff className="h-4 w-4 mr-2" /> : <Power className="h-4 w-4 mr-2" />}
+                                {service.is_active ? "Disable" : "Enable"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive" onClick={() => deleteService(service.id)}>
+                                <Trash2 className="h-4 w-4 mr-2" />Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredServices.length > 0 && (
+                <p className="text-xs text-muted-foreground text-center mt-4">
+                  {filteredServices.length} services {searchQuery || platformFilter !== 'all' ? '(filtered)' : 'total'}
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Edit Service Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">Edit Service</DialogTitle>
+            <DialogDescription>
+              Modify service settings. Provider price is read-only.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Panel Service ID</Label>
+                <Input 
+                  type="number"
+                  value={editForm.service_id}
+                  onChange={(e) => setEditForm({ ...editForm, service_id: parseInt(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Provider Price (Read-only)</Label>
+                <Input 
+                  value={editingService?.provider_price ? `$${editingService.provider_price.toFixed(4)}` : 'N/A'}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Public Service Name</Label>
+              <Input 
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="e.g., Instagram Followers – Premium"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Public Description (Markdown supported)</Label>
+              <Textarea 
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                placeholder="Service description visible to users..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Platform</Label>
+                <Select value={editForm.platform} onValueChange={(v) => setEditForm({ ...editForm, platform: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PLATFORMS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={editForm.category} onValueChange={(v) => setEditForm({ ...editForm, category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Panel Price (per 1000)</Label>
+                <Input 
+                  type="number"
+                  step="0.0001"
+                  value={editForm.base_price}
+                  onChange={(e) => setEditForm({ ...editForm, base_price: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Min Quantity</Label>
+                <Input 
+                  type="number"
+                  value={editForm.min_quantity}
+                  onChange={(e) => setEditForm({ ...editForm, min_quantity: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Max Quantity (Read-only)</Label>
+                <Input 
+                  type="number"
+                  value={editForm.max_quantity}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Speed Estimate</Label>
+              <Input 
+                value={editForm.speed_estimate}
+                onChange={(e) => setEditForm({ ...editForm, speed_estimate: e.target.value })}
+                placeholder="e.g., 1000-5000 per day"
+              />
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-6 pt-2">
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.refill_supported}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, refill_supported: checked })}
+                />
+                <Label>Refill Enabled</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.dripfeed_supported}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, dripfeed_supported: checked })}
+                />
+                <Label>Drip Feed Enabled</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.is_active}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, is_active: checked })}
+                />
+                <Label>Service Visible</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+            <Button onClick={saveService}>
+              <Save className="h-4 w-4 mr-2" />Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Service Dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">Add New Service</DialogTitle>
+            <DialogDescription>
+              Create a new service manually. For provider services, use sync instead.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Panel Service ID</Label>
+                <Input 
+                  type="number"
+                  value={editForm.service_id}
+                  onChange={(e) => setEditForm({ ...editForm, service_id: parseInt(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Platform</Label>
+                <Select value={editForm.platform} onValueChange={(v) => setEditForm({ ...editForm, platform: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PLATFORMS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Service Name</Label>
+              <Input 
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="e.g., Instagram Followers – Premium"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea 
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                placeholder="Service description..."
+                rows={2}
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={editForm.category} onValueChange={(v) => setEditForm({ ...editForm, category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Panel Price</Label>
+                <Input 
+                  type="number"
+                  step="0.01"
+                  value={editForm.base_price}
+                  onChange={(e) => setEditForm({ ...editForm, base_price: e.target.value })}
+                  placeholder="0.50"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Speed Estimate</Label>
+                <Input 
+                  value={editForm.speed_estimate}
+                  onChange={(e) => setEditForm({ ...editForm, speed_estimate: e.target.value })}
+                  placeholder="1K-5K/day"
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Min Quantity</Label>
+                <Input 
+                  type="number"
+                  value={editForm.min_quantity}
+                  onChange={(e) => setEditForm({ ...editForm, min_quantity: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Max Quantity</Label>
+                <Input 
+                  type="number"
+                  value={editForm.max_quantity}
+                  onChange={(e) => setEditForm({ ...editForm, max_quantity: e.target.value })}
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.refill_supported}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, refill_supported: checked })}
+                />
+                <Label>Refill</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.dripfeed_supported}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, dripfeed_supported: checked })}
+                />
+                <Label>Drip Feed</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  checked={editForm.is_active}
+                  onCheckedChange={(checked) => setEditForm({ ...editForm, is_active: checked })}
+                />
+                <Label>Active</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+            <Button onClick={addService}>
+              <Plus className="h-4 w-4 mr-2" />Add Service
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Mapping Dialog */}
+      <Dialog open={mappingDialogOpen} onOpenChange={setMappingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Service Mapping</DialogTitle>
+            <DialogDescription>
+              Provider-to-panel service relationship (admin view only)
+            </DialogDescription>
+          </DialogHeader>
+          {editingService && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Panel Service ID</p>
+                  <p className="font-mono text-primary">{editingService.service_id}</p>
+                </div>
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Provider Service ID</p>
+                  <p className="font-mono">{editingService.provider_service_id || 'N/A'}</p>
+                </div>
+              </div>
+              
+              <div className="p-3 bg-secondary/30 rounded-lg">
+                <p className="text-xs text-muted-foreground mb-1">Panel Service Name</p>
+                <p className="font-medium">{editingService.name}</p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Connected Provider</p>
+                  <p className="font-medium">{getProvider(editingService.provider_id)?.name || 'Manual Entry'}</p>
+                </div>
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Last Updated</p>
+                  <p className="text-sm">{new Date(editingService.updated_at).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Provider Price</p>
+                  <p className="font-mono text-muted-foreground">
+                    {editingService.provider_price ? `$${editingService.provider_price.toFixed(4)}` : 'N/A'}
+                  </p>
+                </div>
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">Panel Price</p>
+                  <p className="font-mono text-success">${editingService.base_price.toFixed(4)}</p>
+                </div>
+              </div>
+
+              {editingService.provider_id && (
+                <div className="p-3 bg-secondary/30 rounded-lg">
+                  <p className="text-xs text-muted-foreground mb-1">API Endpoint</p>
+                  <p className="text-sm font-mono truncate">{getProvider(editingService.provider_id)?.api_url}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMappingDialogOpen(false)}>Close</Button>
+            <Button onClick={() => { setMappingDialogOpen(false); if (editingService) openEditDialog(editingService); }}>
+              <Edit className="h-4 w-4 mr-2" />Edit Service
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Action Confirmation Dialog */}
+      <Dialog open={bulkActionDialogOpen} onOpenChange={setBulkActionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              {bulkActionType === 'enable' && 'Enable Services'}
+              {bulkActionType === 'disable' && 'Disable Services'}
+              {bulkActionType === 'delete' && 'Delete Services'}
+              {bulkActionType === 'price' && 'Adjust Prices'}
+              {bulkActionType === 'category' && 'Change Category'}
+            </DialogTitle>
+            <DialogDescription>
+              This action will affect {selectedServices.size} selected services.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            {bulkActionType === 'price' && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Adjustment Type</Label>
+                  <Select value={bulkPriceChange.type} onValueChange={(v) => setBulkPriceChange({ ...bulkPriceChange, type: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percent">Percentage (%)</SelectItem>
+                      <SelectItem value="flat">Flat Amount ($)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{bulkPriceChange.type === 'percent' ? 'Percentage Change' : 'Amount'}</Label>
+                  <Input 
+                    type="number"
+                    step={bulkPriceChange.type === 'percent' ? '1' : '0.01'}
+                    placeholder={bulkPriceChange.type === 'percent' ? 'e.g., 10 for +10%' : 'e.g., 0.50'}
+                    value={bulkPriceChange.value}
+                    onChange={(e) => setBulkPriceChange({ ...bulkPriceChange, value: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use negative values to decrease prices (e.g., -10 for -10%)
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {bulkActionType === 'category' && (
+              <div className="space-y-2">
+                <Label>New Category</Label>
+                <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
+            {bulkActionType === 'delete' && (
+              <p className="text-destructive text-sm">
+                Warning: This action cannot be undone. All selected services will be permanently deleted.
+              </p>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkActionDialogOpen(false)}>Cancel</Button>
+            <Button 
+              variant={bulkActionType === 'delete' ? 'destructive' : 'default'}
+              onClick={executeBulkAction}
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
