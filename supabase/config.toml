@@ -1,0 +1,16 @@
+project_id = "uekvulsybwxvwpqaymoa"
+
+[functions.detect-country]
+verify_jwt = false
+
+[functions.sync-provider]
+verify_jwt = true
+
+[functions.process-order]
+verify_jwt = true
+
+[functions.check-order-status]
+verify_jwt = true
+
+[functions.auto-check-orders]
+verify_jwt = false
