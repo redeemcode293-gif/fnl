@@ -11,16 +11,39 @@ const INR_TO_USD = 1 / 84;
 function parsePrice(raw: string | number): number {
   if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
   if (!raw) return 0;
-  const n = parseFloat(String(raw).replace(/[₹Rs$€£\s,]/gi, ''));
+  let cleaned = String(raw).replace(/[^0-9,.-]/g, '').trim();
+  if (!cleaned) return 0;
+
+  const hasComma = cleaned.includes(',');
+  const hasDot = cleaned.includes('.');
+
+  // Handle locale formats:
+  // 15,650.19 => 15650.19
+  // 15.650,19 => 15650.19
+  // 15650,19  => 15650.19
+  if (hasComma && hasDot) {
+    if (cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else {
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (hasComma && !hasDot) {
+    cleaned = cleaned.replace(',', '.');
+  }
+
+  const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : n;
 }
 
 function toUsd(val: number, currency: string): number {
   if (val === 0) return 0;
   const c = (currency || 'USD').toUpperCase();
-  if (c === 'INR' || c === '₹' || c === 'RS') return val * INR_TO_USD;
-  if (val > 50) return val * INR_TO_USD; // auto-detect: real SMM prices never > $50/1K
-  return val;
+  // Some providers send INR in paise-like scaled numbers for certain rows.
+  // Normalize obvious outliers before converting.
+  const normalized = c === 'INR' && val > 100000 ? val / 1000 : val;
+  if (c === 'INR' || c === '₹' || c === 'RS') return normalized * INR_TO_USD;
+  if (normalized > 50) return normalized * INR_TO_USD; // auto-detect: real SMM prices never > $50/1K
+  return normalized;
 }
 
 function detectPlatform(cat: string, name: string): string {
@@ -142,7 +165,7 @@ serve(async (req) => {
       if (!Array.isArray(services)) return new Response(JSON.stringify({ error: 'Invalid services response' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
       let added = 0, updated = 0;
-      const BATCH = 50;
+      const BATCH = 250;
 
       for (let i = 0; i < services.length; i += BATCH) {
         const batch = services.slice(i, i + BATCH);
@@ -226,12 +249,13 @@ serve(async (req) => {
           }
         }
 
-        for (const s of toUpd) {
+        const updateTasks = toUpd.map(async (s) => {
           const { id, service_id, ...d } = s;
-          await supabase.from('services').update({ provider_price: d.provider_price, base_price: d.base_price, min_quantity: d.min_quantity, max_quantity: d.max_quantity, refill_supported: d.refill_supported, dripfeed_supported: d.dripfeed_supported, is_active: true }).eq('id', id);
-          await supabase.from('panel_services').update({ price: d.base_price, is_visible: true }).eq('service_id', service_id);
-          updated++;
-        }
+          await supabase.from('services').update({ provider_price: d.provider_price, base_price: d.base_price, min_quantity: d.min_quantity, max_quantity: d.max_quantity, refill_supported: d.refill_supported, dripfeed_supported: d.dripfeed_supported, is_active: true, category: d.category, platform: d.platform, name: d.name, description: d.description }).eq('id', id);
+          await supabase.from('panel_services').update({ price: d.base_price, is_visible: true, category: d.category, platform: d.platform, name: d.name, description: d.description }).eq('service_id', service_id);
+        });
+        await Promise.all(updateTasks);
+        updated += toUpd.length;
 
         console.log(`Batch ${i}-${i+BATCH}: +${toIns.length} / ~${toUpd.length}`);
       }

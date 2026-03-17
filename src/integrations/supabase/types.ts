@@ -139,6 +139,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          admin_visible: boolean
           applied_multiplier: number | null
           auto_refill: boolean | null
           created_at: string
@@ -158,6 +159,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          admin_visible?: boolean
           applied_multiplier?: number | null
           auto_refill?: boolean | null
           created_at?: string
@@ -177,6 +179,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          admin_visible?: boolean
           applied_multiplier?: number | null
           auto_refill?: boolean | null
           created_at?: string
