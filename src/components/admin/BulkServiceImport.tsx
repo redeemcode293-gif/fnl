@@ -36,7 +36,19 @@ const INR_TO_USD = 1 / 84;
 function parseNum(raw: string | number): number {
   if (typeof raw === "number") return isNaN(raw) ? 0 : raw;
   if (!raw) return 0;
-  const cleaned = String(raw).replace(/[₹Rs$€£\s,]/gi, "").trim();
+  let cleaned = String(raw).replace(/[^0-9,.-]/g, "").trim();
+  if (!cleaned) return 0;
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+  if (hasComma && hasDot) {
+    if (cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")) {
+      cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    } else {
+      cleaned = cleaned.replace(/,/g, "");
+    }
+  } else if (hasComma && !hasDot) {
+    cleaned = cleaned.replace(",", ".");
+  }
   const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : n;
 }
@@ -46,10 +58,11 @@ function toUSD(raw: string | number, currency: string): number {
   const v = parseNum(raw);
   if (v === 0) return 0;
   const c = (currency || "USD").toUpperCase();
-  if (c === "INR" || c === "₹" || c === "RS") return v * INR_TO_USD;
+  const normalized = c === "INR" && v > 100000 ? v / 1000 : v;
+  if (c === "INR" || c === "₹" || c === "RS") return normalized * INR_TO_USD;
   // Auto-detect: legitimate USD SMM prices are always < $50/1000 units
-  if (c === "USD" && v > 50) return v * INR_TO_USD;
-  return v;
+  if (c === "USD" && normalized > 50) return normalized * INR_TO_USD;
+  return normalized;
 }
 
 function detectPlatform(cat: string, name: string): string {
@@ -264,7 +277,7 @@ export const BulkServiceImport = () => {
       }
 
       // ── 2. Import in batches of 100 ──
-      const BATCH = 100;
+      const BATCH = 250;
       let added = 0, updated = 0, errors = 0;
 
       for (let i = 0; i < toImport.length; i += BATCH) {
@@ -373,7 +386,7 @@ export const BulkServiceImport = () => {
         }
 
         // ── Update existing services ──
-        for (const s of toUpd) {
+        const updateTasks = toUpd.map(async (s: any) => {
           const { id, service_id, ...updateData } = s;
           await supabase
             .from("services")
@@ -384,6 +397,10 @@ export const BulkServiceImport = () => {
               max_quantity: updateData.max_quantity,
               refill_supported: updateData.refill_supported,
               dripfeed_supported: updateData.dripfeed_supported,
+              category: updateData.category,
+              platform: updateData.platform,
+              name: updateData.name,
+              description: updateData.description,
               is_active: true,
             })
             .eq("id", id);
@@ -399,8 +416,9 @@ export const BulkServiceImport = () => {
             is_visible: true,
             provider_service_uuid: id,
           }]);
-          updated++;
-        }
+        });
+        await Promise.all(updateTasks);
+        updated += toUpd.length;
 
         setImportProgress(Math.min(i + BATCH, toImport.length));
         setImportStats({ added, updated, errors });

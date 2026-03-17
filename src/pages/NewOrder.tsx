@@ -162,10 +162,14 @@ const NewOrder = () => {
   // Filter by platform + search query
   const filteredServices = services.filter(s => {
     const matchPlat = selectedPlatform === "all" || s.platform === selectedPlatform;
-    const q = searchQuery.toLowerCase().trim();
+    const q = searchQuery.toLowerCase().trim().replace(/^#/, "");
+    const compactQ = q.replace(/\s+/g, "");
+    const serviceId = s.service_id.toString();
+    const compactName = s.name.toLowerCase().replace(/\s+/g, "");
     const matchSearch = !q ||
       s.name.toLowerCase().includes(q) ||
-      s.service_id.toString().includes(q) ||
+      compactName.includes(compactQ) ||
+      serviceId.includes(q) ||
       s.category.toLowerCase().includes(q) ||
       s.platform.toLowerCase().includes(q) ||
       (s.description || "").toLowerCase().includes(q);

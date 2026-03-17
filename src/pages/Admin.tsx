@@ -252,6 +252,19 @@ const Admin = () => {
     }
   };
 
+  const toggleOrderAdminVisible = async (orderId: string, currentValue: boolean) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ admin_visible: !currentValue })
+      .eq('id', orderId);
+    if (error) {
+      toast({ title: "Failed to update order visibility", variant: "destructive" });
+    } else {
+      toast({ title: !currentValue ? "Order released to Admin" : "Order hidden from Admin" });
+      fetchAdminData();
+    }
+  };
+
   const adjustUserBalance = async () => {
     if (!selectedUser || !balanceAdjustment) return;
 
@@ -1084,6 +1097,7 @@ const Admin = () => {
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Country</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Multiplier</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Status</th>
+                          {isOwner && <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Admin View</th>}
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground uppercase">Date</th>
                         </tr>
                       </thead>
@@ -1115,6 +1129,19 @@ const Admin = () => {
                                 {order.status}
                               </Badge>
                             </td>
+                            {isOwner && (
+                              <td className="p-3">
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={order.admin_visible ?? false}
+                                    onCheckedChange={() => toggleOrderAdminVisible(order.id, order.admin_visible ?? false)}
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {order.admin_visible ? 'Visible' : 'Hidden'}
+                                  </span>
+                                </div>
+                              </td>
+                            )}
                             <td className="p-3 text-xs text-muted-foreground">
                               {new Date(order.created_at).toLocaleDateString()}
                             </td>
